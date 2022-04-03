@@ -152,6 +152,21 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
     }
     customer_static = pd.DataFrame(customer_static_features)
 
+    customer_sum_spending = (
+        merged_df[["customer_id", "price"]]
+        .groupby(by="customer_id", as_index=False)["price"]
+        .sum()
+    )
+    customer_sum_spending["pays_above_avg"] = (
+        customer_sum_spending.price > customer_sum_spending.price.mean()
+    ).astype(int)
+
+    customer_static = customer_static.merge(
+        right=customer_sum_spending[["customer_id", "pays_above_avg"]],
+        on="customer_id",
+        how="inner",
+    )
+
     assert len(customer_static) == CUSTOMERS
 
     return customer_static, customer_dynamic

@@ -1,3 +1,4 @@
+import os
 from typing import Tuple
 
 import pandas as pd
@@ -88,6 +89,8 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
     Tuple[pd.DataFrame, pd.DataFrame]
         Two DataFrames representing static & dynamic features
     """
+
+    # 1. Dynamic Features
     customer_weekly = merged_df.groupby(by=["customer_id", "week"], as_index=False)[
         ["price", "label"]
     ].sum()
@@ -98,9 +101,11 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
     customer_weekly["sum_spending_last_week"] = customer_weekly[
         "weekly_spending"
     ].shift(periods=1)
-    customer_weekly["n_transactions_last_week_customer"] = (
-        customer_weekly["n_transactions_customer"].shift(periods=1).astype("int64")
-    )
+    customer_weekly["n_transactions_last_week_customer"] = customer_weekly[
+        "n_transactions_customer"
+    ].shift(
+        periods=1
+    )  # .astype("int64") # NOTE: you may rm NaN before already
 
     customer_dynamic = customer_weekly[
         [
@@ -113,6 +118,7 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
 
     assert len(customer_dynamic) == CUSTOMERS * WEEKS
 
+    # 2. Static Features
     customer_static_features = {
         "customer_id": range(CUSTOMERS),
         "avg_n_transactions_weekly_customer": (
@@ -127,21 +133,18 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
             ].weekly_spending.mean()
             for c in range(CUSTOMERS)
         ),
-        # NOTE: Round here to avoid floating point errors. However manipulating decimals could help improve feature quality
+        # NOTE: Round here to avoid floating point errors.
+        # However manipulating decimals could help improve feature quality
         "highest_price_paid": (
             round(
-                merged_df[merged_df.customer_id == c]
-                .groupby(by="customer_id", as_index=False)["price"]
-                .max(),
+                merged_df[merged_df.customer_id == c].price.max(),
                 2,
             )
             for c in range(CUSTOMERS)
         ),
         "lowest_price_paid": (
             round(
-                merged_df[merged_df.customer_id == c]
-                .groupby(by="customer_id", as_index=False)["price"]
-                .max(),
+                merged_df[merged_df.customer_id == c].price.min(),
                 2,
             )
             for c in range(CUSTOMERS)
@@ -154,7 +157,168 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
     return customer_static, customer_dynamic
 
 
-def main():
+def features_product(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+    # 1. Dynamic Features
+    product_weekly = merged_df.groupby(by=["product_id", "week"], as_index=False)[
+        ["price", "label"]
+    ].sum()
+    product_weekly.rename(
+        columns={"label": "n_transactions_product", "price": "weekly_returns"},
+        inplace=True,
+    )
+
+    product_weekly["sum_returns_last_week"] = product_weekly["weekly_returns"].shift(
+        periods=1
+    )
+    product_weekly["n_transactions_last_week_product"] = product_weekly[
+        "n_transactions_product"
+    ].shift(periods=1)
+
+    product_dynamic = product_weekly[
+        [
+            "product_id",
+            "week",
+            "sum_returns_last_week",
+            "n_transactions_last_week_product",
+        ]
+    ]
+
+    assert len(product_dynamic) == PRODUCTS * WEEKS
+
+    # 2. Static Features
+    product_static_features = {
+        "product_id": range(PRODUCTS),
+        "current_price": (  # NOTE: prices don't change in this example
+            merged_df[merged_df.product_id == p].price.max() for p in range(PRODUCTS)
+        ),
+        "avg_n_transactions_weekly_product": (
+            product_weekly[
+                (product_weekly.product_id == p) & (product_weekly.week < 50)
+            ].n_transactions_product.mean()
+            for p in range(PRODUCTS)
+        ),
+        "avg_returns_weekly": (
+            product_weekly[
+                (product_weekly.product_id == p) & (product_weekly.week < 50)
+            ].weekly_returns.mean()
+            for p in range(PRODUCTS)
+        ),
+    }
+
+    product_static = pd.DataFrame(product_static_features)
+    product_static.sort_values(by="product_id", inplace=True)
+
+    assert len(product_static) == PRODUCTS
+
+    return product_static, product_dynamic
+
+
+def features_week(train_df: pd.DataFrame) -> pd.DataFrame:
+
+    # 1. Calculate weekly returns
+    weekly_returns = (
+        train_df[["week", "price"]]
+        .groupby(by="week", as_index=False)["price"]
+        .sum()
+        .rename(columns={"price": "sum_returns"})
+    )
+    # NOTE: This creates 4 weeks of NaNs! If you drop them later, you may loose information.
+    # If you fill NaNs, the mapping between X and Y becomes less clear.
+    weekly_returns["moving_avg_returns_lm"] = weekly_returns.sum_returns.rolling(
+        4
+    ).mean()
+
+    # removing NaNs also removes quite a fraction of our target, so we better backfill missing values
+    weekly_returns["moving_avg_returns_lm"].bfill(inplace=True)
+
+    # Use last weeks data in current week
+    weekly_returns.week = weekly_returns.week + 1
+
+    # 2. Calculate weekly transactions
+    weekly_transactions = pd.DataFrame(
+        {
+            "week": list(train_df["week"].value_counts().index),
+            "sum_transactions": train_df["week"].value_counts().values,
+        }
+    )
+    weekly_transactions.sort_values(by="week", inplace=True)
+
+    weekly_transactions[
+        "moving_avg_transactions_lm"
+    ] = weekly_transactions.sum_transactions.rolling(4).mean()
+
+    weekly_transactions["moving_avg_transactions_lm"].bfill(inplace=True)
+
+    # Use last weeks data in current week
+    weekly_transactions.week = weekly_transactions.week + 1
+
+    weekly_aggregation = weekly_returns.merge(
+        weekly_transactions, how="left", on="week", validate="1:1"
+    )
+    weekly_aggregation.rename(
+        columns={
+            "sum_returns": "sum_returns_last_week",
+            "sum_transactions": "sum_transactions_last_week",
+        },
+        inplace=True,
+    )
+
+    return weekly_aggregation
+
+
+def merge_all_data_sets(
+    merged_df: pd.DataFrame,
+    customer_static_df: pd.DataFrame,
+    customer_dynamic_df: pd.DataFrame,
+    product_static_df: pd.DataFrame,
+    product_dynamic_df: pd.DataFrame,
+    weekly_aggregation_df: pd.DataFrame,
+):
+
+    # 1. Static Customer Data to Skeleton
+    merged_combo = merged_df.merge(
+        right=customer_static_df, how="left", on="customer_id", validate="m:1"
+    )
+
+    # 2. Dynamic Customer Data to Skeleton
+    merged_combo = merged_combo.merge(
+        right=customer_dynamic_df,
+        how="left",
+        on=["customer_id", "week"],
+        validate="m:1",
+    )
+
+    # 3. Static Product Data to Skeleton
+    merged_combo = merged_combo.merge(
+        right=product_static_df, how="left", on=["product_id"], validate="m:1"
+    )
+
+    # 4. Dynamic Product Data to Skeleton
+    merged_combo = merged_combo.merge(
+        right=product_dynamic_df, how="left", on=["product_id", "week"], validate="m:1"
+    )
+
+    # 5. Dynamic Aggregations to Skeleton
+    merged_combo = merged_combo.merge(
+        right=weekly_aggregation_df, how="left", on="week", validate="m:1"
+    )
+
+    # 6. Set Label
+    merged_combo.label.fillna(0, inplace=True)  # NaN ~ no transaction
+
+    # 7. Additional Features
+    # Budget & Prices used to
+    within_budget = (merged_combo.highest_price_paid >= merged_combo.current_price) & (
+        merged_combo.current_price >= merged_combo.lowest_price_paid
+    )
+
+    merged_combo["within_budget"] = within_budget.astype(int)
+
+    return merged_combo
+
+
+def make_raw_data():
 
     # 1. Create Skeleton
     skeleton_data = skeleton()
@@ -169,6 +333,49 @@ def main():
     customer_static_data, customer_dynamic_data = features_customer(
         merged_df=merged_data
     )
+
+    # 5. Create Features based on Product related data
+    product_static_data, product_dynamic_data = features_product(merged_df=merged_data)
+
+    # 6. Create global aggregation features
+    weekly_aggregation_data = features_week(train_df=train_data)
+
+    # 7. Bringing all Data together
+    all_data = merge_all_data_sets(
+        merged_df=merged_data,
+        customer_static_df=customer_static_data,
+        customer_dynamic_df=customer_dynamic_data,
+        product_static_df=product_static_data,
+        product_dynamic_df=product_dynamic_data,
+        weekly_aggregation_df=weekly_aggregation_data,
+    )
+
+    # Remove week 1 due to many NaNs
+    all_data = all_data.copy()[all_data.week > 1]
+
+    return all_data.astype(
+        {
+            "label": "int64",
+            "n_transactions_last_week_product": "int64",
+            "sum_transactions_last_week": "int64",
+            "moving_avg_transactions_lm": "int64",
+            "n_transactions_last_week_customer": "int64",
+        }
+    )
+
+
+def create_training_data_file(parquet_file: str = "training_01.parquet"):
+    # Run in optimized mode when creating file
+    os.environ["PYTHONOPTIMIZE"] = "1"
+
+    data = make_raw_data()
+    training = data.columns[4:]
+
+    data[training][data.week < 50].to_parquet(parquet_file)
+
+
+def main():
+    create_training_data_file("training_01.parquet")
 
 
 if __name__ == "__main__":

@@ -222,6 +222,22 @@ def features_product(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     }
 
     product_static = pd.DataFrame(product_static_features)
+
+    product_prices = (
+        merged_df[["product_id", "price"]]
+        .groupby(by="product_id", as_index=False)["price"]
+        .mean()
+    )
+    product_prices["costs_above_avg"] = (
+        product_prices.price > product_prices.price.mean()
+    ).astype(int)
+
+    product_static = product_static.merge(
+        right=product_prices[["product_id", "costs_above_avg"]],
+        on="product_id",
+        how="inner",
+    )
+
     product_static.sort_values(by="product_id", inplace=True)
 
     assert len(product_static) == PRODUCTS

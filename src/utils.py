@@ -288,11 +288,10 @@ def features_week(train_df: pd.DataFrame) -> pd.DataFrame:
         weekly_transactions, how="left", on="week", validate="1:1"
     )
 
-    # TODO:Fix 'sum_returns_last_week_<x|y>' merging error
     weekly_aggregation.rename(
         columns={
-            "sum_returns": "sum_returns_last_week",
-            "sum_transactions": "sum_transactions_last_week",
+            "sum_returns": "sum_returns_last_week_general",
+            "sum_transactions": "sum_transactions_last_week_general",
         },
         inplace=True,
     )
@@ -384,17 +383,20 @@ def make_raw_data():
     )
 
     # Remove week 1 due to many NaNs
-    all_data = all_data[all_data.week > 1]
-
-    return all_data.astype(
+    all_data = all_data[all_data.week > 1].astype(
         {
             "label": "int64",
             "n_transactions_last_week_product": "int64",
-            "sum_transactions_last_week": "int64",
             "moving_avg_transactions_lm": "int64",
             "n_transactions_last_week_customer": "int64",
+            "sum_transactions_last_week_general": "int64",
         }
     )
+
+    assert (
+        all_data[(c for c in all_data.columns if c != "price")].isna().sum().sum() == 0
+    )
+    return all_data
 
 
 def create_training_data_file(parquet_file: str = "training_01.parquet"):

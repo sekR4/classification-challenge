@@ -4,6 +4,7 @@
 .DS_Store
 *.parquet
 src/catboost_info
+draft.*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

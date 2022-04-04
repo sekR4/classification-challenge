@@ -1,7 +1,11 @@
 import os
+import warnings
 from typing import Tuple
 
 import pandas as pd
+from surprise import Dataset, KNNWithMeans, Reader
+
+warnings.filterwarnings("ignore")
 
 CUSTOMERS = 2000
 PRODUCTS = 100
@@ -382,6 +386,12 @@ def make_raw_data():
         weekly_aggregation_df=weekly_aggregation_data,
     )
 
+    # 8. Add Ratings
+    ratings = create_ratings()
+    all_data = all_data.merge(
+        right=ratings, how="left", on=["customer_id", "product_id"]
+    )
+
     # Remove week 1 due to many NaNs
     all_data = all_data[all_data.week > 1].astype(
         {
@@ -399,18 +409,75 @@ def make_raw_data():
     return all_data
 
 
-def create_training_data_file(parquet_file: str):
-    # Run in optimized mode when creating file
+def create_ratings(scaling_factor: int = 5) -> pd.DataFrame:
+    data = pd.read_csv("data/train.csv")
+
+    # 1. Get times bought per customer product pair
+    cp_affection = (
+        data[["customer_id", "product_id"]]
+        .groupby(by=["customer_id", "product_id"], as_index=False)
+        .value_counts()
+        .sort_values(by=["customer_id", "count"])
+    )
+    cp_affection.rename(columns={"count": "times_bought"}, inplace=True)
+
+    # 2. Scale times bought for each customer
+    affection_scaled = pd.DataFrame(columns=cp_affection.columns)
+
+    for customer in cp_affection.customer_id.unique():
+        tmp = cp_affection.copy()[cp_affection.customer_id == customer]
+        X = tmp.times_bought
+        tmp["times_bought_scaled"] = round(
+            ((X - X.min()) / (X.max() - X.min())) * scaling_factor, 2
+        )
+        affection_scaled = pd.concat([affection_scaled, tmp], ignore_index=True)
+
+    affection_scaled = affection_scaled[
+        ["customer_id", "product_id", "times_bought_scaled"]
+    ]
+
+    # 3. Train simple Model
+    reader = Reader(rating_scale=(0, scaling_factor))
+    rec_data = Dataset.load_from_df(affection_scaled, reader)
+
+    sim_options = {
+        "name": "cosine",
+        "user_based": False,  # Compute similarities between items
+    }
+    rec_model = KNNWithMeans(sim_options=sim_options)
+    rec_model.fit(rec_data.build_full_trainset())
+
+    # Build customer product pairs
+    customer_product_pair_gen = (
+        (c, p) for c in range(CUSTOMERS) for p in range(PRODUCTS)
+    )
+    ratings = pd.DataFrame(
+        customer_product_pair_gen, columns=["customer_id", "product_id"]
+    )
+    ratings["ratings"] = ratings.apply(
+        lambda x: rec_model.predict(x.customer_id, x.product_id).est, axis=1
+    )
+    return ratings
+
+
+def create_training_data():
+
+    # Run in optimized mode
     os.environ["PYTHONOPTIMIZE"] = "1"
 
     data = make_raw_data()
     training = data.columns[4:]
 
-    data[training][data.week < 50].to_parquet(parquet_file)
+    return data[training][data.week < 50]
+
+
+def create_training_data_file(parquet_file: str):
+    data = create_training_data()
+    data.to_parquet(parquet_file)
 
 
 def main():
-    create_training_data_file("data/training_02.parquet")
+    create_training_data_file("data/training_03.parquet")
 
 
 if __name__ == "__main__":

@@ -399,7 +399,7 @@ def make_raw_data():
     return all_data
 
 
-def create_training_data_file(parquet_file: str = "training_01.parquet"):
+def create_training_data_file(parquet_file: str):
     # Run in optimized mode when creating file
     os.environ["PYTHONOPTIMIZE"] = "1"
 
@@ -410,7 +410,7 @@ def create_training_data_file(parquet_file: str = "training_01.parquet"):
 
 
 def main():
-    create_training_data_file("training_02.parquet")
+    create_training_data_file("data/training_02.parquet")
 
 
 if __name__ == "__main__":

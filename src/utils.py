@@ -287,6 +287,8 @@ def features_week(train_df: pd.DataFrame) -> pd.DataFrame:
     weekly_aggregation = weekly_returns.merge(
         weekly_transactions, how="left", on="week", validate="1:1"
     )
+
+    # TODO:Fix 'sum_returns_last_week_<x|y>' merging error
     weekly_aggregation.rename(
         columns={
             "sum_returns": "sum_returns_last_week",
@@ -355,7 +357,7 @@ def make_raw_data():
     skeleton_data = skeleton()
 
     # 2. Read (incomplete) Train Data
-    train_data = pd.read_csv("train.csv")
+    train_data = pd.read_csv("data/train.csv")
 
     # 3. Merge Skeleton & (incomplete) Train Data
     merged_data = merge_with_skeleton(skeleton_df=skeleton_data, train_df=train_data)
@@ -382,7 +384,7 @@ def make_raw_data():
     )
 
     # Remove week 1 due to many NaNs
-    all_data = all_data.copy()[all_data.week > 1]
+    all_data = all_data[all_data.week > 1]
 
     return all_data.astype(
         {
@@ -406,7 +408,7 @@ def create_training_data_file(parquet_file: str = "training_01.parquet"):
 
 
 def main():
-    create_training_data_file("training_01.parquet")
+    create_training_data_file("training_02.parquet")
 
 
 if __name__ == "__main__":

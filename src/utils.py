@@ -177,6 +177,19 @@ def features_customer(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
 
 
 def features_product(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Creates dynamic & static product features which can be used for a later joins.
+
+    Parameters
+    ----------
+    merged_df : pd.DataFrame
+        Dataframe created with merge_with_skeleton() which represents a combination of
+        generated and given data
+
+    Returns
+    -------
+    Tuple[pd.DataFrame, pd.DataFrame]
+        Two dataframes: product_static, product_dynamic
+    """
 
     # 1. Dynamic Features
     product_weekly = merged_df.groupby(by=["product_id", "week"], as_index=False)[
@@ -208,7 +221,7 @@ def features_product(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     # 2. Static Features
     product_static_features = {
         "product_id": range(PRODUCTS),
-        "current_price": (  # NOTE: prices don't change in this example
+        "current_price": (  # NOTE: prices don't change in this example, so w can use them for all weeks
             merged_df[merged_df.product_id == p].price.max() for p in range(PRODUCTS)
         ),
         "avg_n_transactions_weekly_product": (
@@ -250,6 +263,21 @@ def features_product(merged_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
 
 
 def features_week(train_df: pd.DataFrame) -> pd.DataFrame:
+    """Creates general features like sum of transactions and sum of returns for each week.
+    Since these feature are reflecting the `heat` of the market they might be of some use, even
+    as lag features.
+
+    Parameters
+    ----------
+    train_df : pd.DataFrame
+        Original (incomplete) training data given
+
+    Returns
+    -------
+    pd.DataFrame
+        A Dataframe containing sum_returns_last_week_general & sum_transactions_last_week_general
+        for each week
+    """
 
     # 1. Calculate weekly returns
     weekly_returns = (
@@ -264,7 +292,7 @@ def features_week(train_df: pd.DataFrame) -> pd.DataFrame:
         4
     ).mean()
 
-    # removing NaNs also removes quite a fraction of our target, so we better backfill missing values
+    # Removing NaNs completely also removes quite a fraction of our target, so we better backfill missing values
     weekly_returns["moving_avg_returns_lm"].bfill(inplace=True)
 
     # Use last weeks data in current week
@@ -310,7 +338,31 @@ def merge_all_data_sets(
     product_static_df: pd.DataFrame,
     product_dynamic_df: pd.DataFrame,
     weekly_aggregation_df: pd.DataFrame,
-):
+) -> pd.DataFrame:
+    """This method merges (almost) all relevant Dataframes. It combines the created
+    skeleton (merged_df) with all derived features and returns a complete dataset from
+    week 1 until week 50.
+
+    Parameters
+    ----------
+    merged_df : pd.DataFrame
+        Combination of generated & given data
+    customer_static_df : pd.DataFrame
+        Derived static customer features
+    customer_dynamic_df : pd.DataFrame
+        Derived dynamic customer features
+    product_static_df : pd.DataFrame
+        Derived static product features
+    product_dynamic_df : pd.DataFrame
+        Derived dynamic product features
+    weekly_aggregation_df : pd.DataFrame
+        General features weekly aggregated
+
+    Returns
+    -------
+    pd.DataFrame
+        Complete data set almost ready for training
+    """
 
     # 1. Static Customer Data to Skeleton
     merged_combo = merged_df.merge(
@@ -354,7 +406,15 @@ def merge_all_data_sets(
     return merged_combo
 
 
-def make_raw_data():
+def make_raw_data() -> pd.DataFrame:
+    """Creates a complete data set by combining all methods. In addition it also adds predicted
+    user-product ratings as a feature. This function also aligns some data types
+
+    Returns
+    -------
+    pd.DataFrame
+        Complete dataset (week 2-50)
+    """
 
     # 1. Create Skeleton
     skeleton_data = skeleton()
@@ -410,6 +470,18 @@ def make_raw_data():
 
 
 def create_ratings(scaling_factor: int = 5) -> pd.DataFrame:
+    """Creates user-product ratings predicted with a rudimentary recommender model.
+
+    Parameters
+    ----------
+    scaling_factor : int, optional
+        factor used during Min-Max-Normalization (make it look like ratings), by default 5
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe containing "customer_id", "product_id" and corresponding "ratings"
+    """
     data = pd.read_csv("data/train.csv")
 
     # 1. Get times bought per customer product pair
@@ -462,7 +534,7 @@ def create_ratings(scaling_factor: int = 5) -> pd.DataFrame:
 
 def create_w50_data() -> pd.DataFrame:
     """This creates a dataset containing customer ids, product ids and all features needed
-    to predict probabilities for week 50
+    to predict probabilities for week 50.
 
     Returns
     -------
@@ -485,7 +557,14 @@ def store_predictions(data_week50, y_scores, csv_name="output/delivery.csv"):
     delivery.to_csv(csv_name, index=False)
 
 
-def create_training_data():
+def create_training_data() -> pd.DataFrame:
+    """Creates ready to use training data
+
+    Returns
+    -------
+    pd.DataFrame
+        Training data
+    """
 
     # Run in optimized mode
     os.environ["PYTHONOPTIMIZE"] = "1"

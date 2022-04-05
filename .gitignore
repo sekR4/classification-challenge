@@ -5,6 +5,7 @@
 *.parquet
 src/catboost_info
 draft.*
+src/models/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

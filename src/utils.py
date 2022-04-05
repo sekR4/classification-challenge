@@ -460,6 +460,31 @@ def create_ratings(scaling_factor: int = 5) -> pd.DataFrame:
     return ratings
 
 
+def create_w50_data() -> pd.DataFrame:
+    """This creates a dataset containing customer ids, product ids and all features needed
+    to predict probabilities for week 50
+
+    Returns
+    -------
+    pd.DataFrame
+    """
+
+    # Run in optimized mode
+    os.environ["PYTHONOPTIMIZE"] = "1"
+
+    data = make_raw_data()
+    data_w50 = data[data.week == 50]
+    columns = [c for c in data_w50.columns if c not in ["week", "price", "label"]]
+
+    return data_w50[columns]
+
+
+def store_predictions(data_week50, y_scores, csv_name="output/delivery.csv"):
+    delivery = data_week50.copy()
+    delivery["probability"] = y_scores
+    delivery.to_csv(csv_name, index=False)
+
+
 def create_training_data():
 
     # Run in optimized mode
